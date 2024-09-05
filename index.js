@@ -57,15 +57,28 @@ app.post('/login', async (req, res) => {
     await page.waitForNavigation({ waitUntil: 'networkidle2' });
 
     // Verifica se houve falha no login ou se há uma verificação adicional necessária
-    if (page.url().includes('facebook.com/login') || page.url().includes('checkpoint')) {
-      // Captura o texto de qualquer elemento que possa conter a mensagem de verificação
-      const verificationMessage = await page.evaluate(() => {
-        // Tenta encontrar o texto de verificação comum
-        const element = document.querySelector('body');
-        return element ? element.innerText : 'Verificação adicional necessária, mas não foi possível identificar a mensagem específica.';
-      });
+    const loginStatus = await page.evaluate(() => {
+      const bodyText = document.body.innerText;
+      const loginFailed = bodyText.includes('Invalid username or password');
+      const captchaPresent = bodyText.includes('Please enter the characters you see');
+      const twoFactorPresent = bodyText.includes('Enter the code from your Authenticator app');
+      
+      return {
+        loginFailed,
+        captchaPresent,
+        twoFactorPresent,
+        bodyText,
+      };
+    });
 
-      return res.status(401).json({ message: 'Falha no login ou verificação adicional necessária', verificationMessage });
+    if (loginStatus.loginFailed) {
+      return res.status(401).json({ message: 'Credenciais inválidas' });
+    } else if (loginStatus.captchaPresent) {
+      return res.status(401).json({ message: 'CAPTCHA necessário' });
+    } else if (loginStatus.twoFactorPresent) {
+      return res.status(401).json({ message: 'Autenticação de dois fatores necessária' });
+    } else if (page.url().includes('facebook.com/login') || page.url().includes('checkpoint')) {
+      return res.status(401).json({ message: 'Falha no login ou verificação adicional necessária', verificationMessage: loginStatus.bodyText });
     }
 
     res.json({ message: 'Login bem-sucedido' });
