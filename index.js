@@ -1,5 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -87,26 +89,73 @@ app.post('/login', async (req, res) => {
   }
 });
 
+// Endpoint para capturar o HTML da página de login
+app.get('/login-html', async (req, res) => {
+  if (!browser) await initBrowser();
 
-// Endpoint para scraping
+  try {
+    page = await browser.newPage();
+    await page.goto('https://www.facebook.com/login', { waitUntil: 'networkidle2' });
+
+    // Captura o HTML completo da página
+    const pageContent = await page.content();
+    
+    res.send(pageContent);
+  } catch (error) {
+    res.status(500).json({ message: 'Erro ao capturar HTML da página de login', error: error.message });
+  }
+});
+
+
+// Endpoint para capturar a tela da página de login e armazenar em uma pasta
+app.get('/login-screenshot', async (req, res) => {
+  if (!browser) await initBrowser();
+
+  try {
+    page = await browser.newPage();
+    await page.goto('https://www.facebook.com/login', { waitUntil: 'networkidle2' });
+
+    // Cria a pasta 'uploads' se não existir
+    const uploadDir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir);
+    }
+
+    // Gera um nome de arquivo único para evitar sobrescrever arquivos
+    const filename = `login-screenshot-${Date.now()}.png`;
+    const filepath = path.join(uploadDir, filename);
+
+    // Salva a captura de tela na pasta 'uploads'
+    await page.screenshot({ path: filepath });
+
+    // Retorna a URL para acessar a imagem
+    const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${filename}`;
+    res.json({ message: 'Captura de tela salva com sucesso', imageUrl });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro ao capturar a tela da página de login', error: error.message });
+  }
+});
+
+// Servir arquivos da pasta 'uploads' como estáticos
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Scrape
 app.get('/scrape', async (req, res) => {
   if (!page) return res.status(400).json({ message: 'Sessão não iniciada' });
 
   const query = req.body.q || 'Eleicoes em mocambique';
-  const filters = req.body.filters || 'eyJyZWNlbnRfcG9zdHM6MCI6IntcIm5hbWVcIjpcInJlY2VudF9wb3N0c1wiLFwiYXJnc1wiOlwiXCJ9IiwicnBfY3JlYXRpb25fdGltZTowIjoie1wibmFtZVwiOlwiY3JlYXRpb25fdGltZVwiLFwiYXJnc1wiOlwie1xcXCJzdGFydF95ZWFyXFxcIjpcXFwiMjAyNFxcXCIsXFxcInN0YXJ0X21vbnRoXFxcIjpcXFwiMjAyNC0xXFxcIixcXFwiZW5kX3llYXJcXFwiOlxcXCIyMDI0XFxcIixcXFwiZW5kX21vbnRoXFxcIjpcXFwiMjAyNC0xMlxcXCIsXFxcInN0YXJ0X2RheVxcXCI6XFxcIjIwMjQtMS0xXFxcIixcXFwiZW5kX2RheVxcXCI6XFxcIjIwMjQtMTItMzFcXFwifVwifSJ9';
+  const filters = req.body.filters || 'eyJyZWNlbnRfcG9zdHM6MCI6IntcIm5hbWVcIjpcInJlY2VudF9wb3N0c1wiLFwiYXJnc1wiOlwie1xcXCJzdGFydF95ZWFyXFxcIjpcXFwiMjAyNFxcXCIsXFxcInN0YXJ0X21vbnRoXFxcIjpcXFwiMjAyNC0xXFxcIixcXFwiZW5kX3llYXJcXFxcIjpcXFwiMjAyNFxcXCIsXFxcImVuZF9tb250aFxcXCI6XFxcIjIwMjRcXFwiLFxcXCJzdGFydF9kYXlcXFwiOlxcXCIyMDI0LTFcXFwiLFxcXCJlbmRfZGF5XFxcIjpcXFwiMjAyNC0xMi0zMVxcXCJ9XFwifSJ9';
 
   try {
     const searchUrl = `https://web.facebook.com/search/posts?q=${encodeURIComponent(query)}&filters=${encodeURIComponent(filters)}`;
 
-    await page.goto(searchUrl.toString(), { waitUntil: 'networkidle2' });
+    await page.goto(searchUrl.toString(), { waitUntil: 'networkidle2', timeout: 60000 });
 
     const scrollAndWait = async (page, timeout = 10000) => {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       await new Promise(resolve => setTimeout(resolve, timeout));
     };
- 
-
-    // Para fazer um scroll
+    
     await scrollAndWait(page);
 
     const posts = await page.evaluate(() => {
@@ -123,6 +172,7 @@ app.get('/scrape', async (req, res) => {
     res.status(500).json({ message: 'Erro ao executar o scraping', error: error.message });
   }
 });
+
 
 // Endpoint para logout
 app.post('/logout', async (req, res) => {
